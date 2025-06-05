@@ -12,15 +12,16 @@ st.set_page_config(
 
 class AdminAPIClient:
     """운영자용 API 클라이언트"""
-    
-    def __init__(self, base_url: str):
-        self.base_url = base_url
+
+    def __init__(self, backend_url: str, gateway_url: str):
+        self.backend_url = backend_url
+        self.gateway_url = gateway_url
         self.headers = {"Authorization": "Bearer admin_token"}
     
     def get_tools(self) -> List[Dict]:
         """도구 목록 조회"""
         try:
-            response = requests.get(f"{self.base_url}/api/admin/tools", headers=self.headers)
+            response = requests.get(f"{self.backend_url}/api/admin/tools", headers=self.headers)
             response.raise_for_status()
             return response.json().get("tools", [])
         except Exception as e:
@@ -31,7 +32,7 @@ class AdminAPIClient:
         """도구 추가"""
         try:
             data = {"name": name, "config": config}
-            response = requests.post(f"{self.base_url}/api/admin/tools", headers=self.headers, json=data)
+            response = requests.post(f"{self.backend_url}/api/admin/tools", headers=self.headers, json=data)
             response.raise_for_status()
             return True
         except Exception as e:
@@ -41,7 +42,7 @@ class AdminAPIClient:
     def delete_tool(self, name: str) -> bool:
         """도구 삭제"""
         try:
-            response = requests.delete(f"{self.base_url}/api/admin/tools/{name}", headers=self.headers)
+            response = requests.delete(f"{self.backend_url}/api/admin/tools/{name}", headers=self.headers)
             response.raise_for_status()
             return True
         except Exception as e:
@@ -51,7 +52,7 @@ class AdminAPIClient:
     def apply_changes(self) -> bool:
         """변경사항 적용"""
         try:
-            response = requests.post(f"{self.base_url}/api/admin/tools/apply", headers=self.headers)
+            response = requests.post(f"{self.backend_url}/api/admin/tools/apply", headers=self.headers)
             response.raise_for_status()
             return True
         except Exception as e:
@@ -61,7 +62,7 @@ class AdminAPIClient:
     def get_agent_status(self) -> Dict:
         """에이전트 상태 조회"""
         try:
-            response = requests.get(f"{self.base_url}/api/admin/agent/status", headers=self.headers)
+            response = requests.get(f"{self.backend_url}/api/admin/agent/status", headers=self.headers)
             response.raise_for_status()
             return response.json()
         except Exception as e:
@@ -71,18 +72,28 @@ class AdminAPIClient:
     def get_stats(self) -> Dict:
         """통계 조회"""
         try:
-            response = requests.get(f"{self.base_url}/api/admin/stats", headers=self.headers)
+            response = requests.get(f"{self.backend_url}/api/admin/stats", headers=self.headers)
             response.raise_for_status()
             return response.json()
         except Exception as e:
             st.error(f"통계 조회 실패: {e}")
             return {}
+
+    def get_queue(self) -> List[Dict]:
+        """작업 큐 상태 조회"""
+        try:
+            response = requests.get(f"{self.gateway_url}/api/admin/queue", headers=self.headers)
+            response.raise_for_status()
+            return response.json().get("queue", [])
+        except Exception as e:
+            st.error(f"큐 조회 실패: {e}")
+            return []
     
     def reinitialize_agent(self, model_name: str) -> bool:
         """에이전트 재초기화"""
         try:
             data = {"model_name": model_name}
-            response = requests.post(f"{self.base_url}/api/admin/agent/reinitialize", headers=self.headers, json=data)
+            response = requests.post(f"{self.backend_url}/api/admin/agent/reinitialize", headers=self.headers, json=data)
             response.raise_for_status()
             return True
         except Exception as e:
@@ -129,7 +140,7 @@ def main():
     st.markdown("---")
     
     # API 클라이언트 초기화
-    api_client = AdminAPIClient("http://localhost:8000")
+    api_client = AdminAPIClient("http://localhost:8001", "http://localhost:8000")
     
     # 탭 생성
     tab1, tab2, tab3, tab4 = st.tabs(["📊 대시보드", "🔧 도구 관리", "🤖 에이전트 관리", "📈 모니터링"])
@@ -382,7 +393,7 @@ def main():
         with col1:
             st.write("**서버 상태:**")
             try:
-                health_response = requests.get("http://localhost:8000/health", timeout=5)
+                health_response = requests.get("http://localhost:8001/health", timeout=5)
                 if health_response.status_code == 200:
                     st.success("✅ 백엔드 서버 정상")
                     health_data = health_response.json()
@@ -396,16 +407,23 @@ def main():
             st.write("**에이전트 메트릭:**")
             agent_status = api_client.get_agent_status()
             if agent_status:
-                # 간단한 메트릭 표시
                 metrics = {
                     "초기화 상태": "✅ 완료" if agent_status.get('is_initialized') else "❌ 실패",
                     "사용 가능한 도구": f"{agent_status.get('tools_count', 0)}개",
                     "모델": agent_status.get('model_name', 'Unknown'),
                     "MCP 연결": "✅ 활성" if agent_status.get('mcp_client_active') else "❌ 비활성"
                 }
-                
                 for key, value in metrics.items():
                     st.write(f"**{key}:** {value}")
+
+            queue = api_client.get_queue()
+            st.markdown("---")
+            st.write("**대기 중인 요청:**")
+            if queue:
+                for item in queue:
+                    st.write(f"ID: {item['id']} | 상태: {item['status']}")
+            else:
+                st.write("대기 중인 요청 없음")
         
         # 로그 섹션 (향후 구현)
         st.markdown("---")

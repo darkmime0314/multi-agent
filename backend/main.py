@@ -8,6 +8,7 @@ import json
 import asyncio
 from core.agent_service import MCPAgentService
 from core.tool_service import MCPToolService
+from queue_service import queue_service, RequestItem
 
 app = FastAPI(title="LangGraph MCP Agents API", version="2.0.0")
 
@@ -177,11 +178,23 @@ async def health_check():
     return {"status": "healthy", "service": "LangGraph MCP Agents"}
 
 # 앱 시작 시 에이전트 초기화
+async def process_queue():
+    """Background worker processing queued requests."""
+    while True:
+        item: RequestItem | None = await queue_service.dequeue()
+        if not item:
+            continue
+        async for chunk in agent_service.chat_stream(item.message, item.thread_id):
+            await item.response_queue.put(chunk)
+        await queue_service.complete(item.id)
+
+
 @app.on_event("startup")
 async def startup_event():
-    """서버 시작 시 에이전트 초기화"""
+    """Initialize agent and start worker."""
     await agent_service.initialize_agent()
+    asyncio.create_task(process_queue())
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8001)

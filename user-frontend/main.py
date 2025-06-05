@@ -19,6 +19,7 @@ class UserWebSocketClient:
         self.ws = None
         self.is_connected = False
         self.response_buffer = ""
+        self.request_id = None
         
     def connect(self):
         """웹소켓 연결"""
@@ -54,10 +55,14 @@ class UserWebSocketClient:
         try:
             response = self.ws.recv()
             data = json.loads(response)
-            
-            if data.get("type") == "response_chunk":
+
+            if data.get("type") == "queued":
+                self.request_id = data.get("request_id")
+                return ""
+            elif data.get("type") == "response_chunk":
                 return data.get("data", "")
             elif data.get("type") == "response_complete":
+                self.request_id = None
                 return None  # 완료 신호
             elif data.get("type") == "error":
                 st.error(data.get("data", "알 수 없는 오류"))
@@ -65,6 +70,18 @@ class UserWebSocketClient:
         except Exception as e:
             st.error(f"응답 수신 실패: {e}")
             return None
+
+    def cancel(self):
+        if self.request_id:
+            try:
+                import requests
+                requests.delete(
+                    f"http://localhost:8000/api/user/requests/{self.request_id}",
+                    headers={"Authorization": "Bearer user_token"},
+                    timeout=5,
+                )
+            except Exception as e:
+                st.error(f"취소 실패: {e}")
     
     def close(self):
         """연결 종료"""
@@ -81,6 +98,8 @@ def main():
         st.session_state.messages = []
     if "thread_id" not in st.session_state:
         st.session_state.thread_id = "default"
+    if "current_request_id" not in st.session_state:
+        st.session_state.current_request_id = None
     
     # 채팅 기록 표시
     for message in st.session_state.messages:
@@ -105,17 +124,19 @@ def main():
             if client.connect():
                 # 메시지 전송
                 if client.send_message(prompt, st.session_state.thread_id):
-                    # 스트리밍 응답 수신
                     while True:
                         chunk = client.receive_response()
-                        if chunk is None:  # 완료 또는 오류
+                        if chunk is None:
                             break
-                        
+                        if chunk == "":
+                            st.session_state.current_request_id = client.request_id
+                            continue
                         full_response += chunk
                         response_placeholder.markdown(full_response + "▌")
-                        time.sleep(0.01)  # 부드러운 스트리밍 효과
-                    
+                        time.sleep(0.01)
+
                     response_placeholder.markdown(full_response)
+                    st.session_state.current_request_id = None
                 
                 client.close()
             else:
@@ -131,6 +152,19 @@ def main():
         st.header("📊 상태")
         if st.button("🔄 새로고침"):
             st.rerun()
+
+        if st.session_state.current_request_id:
+            if st.button("❌ 요청 취소"):
+                try:
+                    import requests
+                    requests.delete(
+                        f"http://localhost:8000/api/user/requests/{st.session_state.current_request_id}",
+                        headers={"Authorization": "Bearer user_token"},
+                        timeout=5,
+                    )
+                    st.session_state.current_request_id = None
+                except Exception as e:
+                    st.error(f"취소 실패: {e}")
         
         try:
             import requests
