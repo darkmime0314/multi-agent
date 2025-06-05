@@ -1,16 +1,40 @@
 version: '3.8'
 
 services:
-  backend:
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    networks:
+      - app_network
+
+  gateway-app:
     build:
       context: .
-      dockerfile: docker/backend.Dockerfile
+      dockerfile: docker/gateway-app.Dockerfile
+    depends_on:
+      - rabbitmq
+    networks:
+      - app_network
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: docker/api-gateway.Dockerfile
     ports:
-      - "8000:8000"
-    environment:
-      - DATABASE_URL=sqlite:///./shared_data.db
-    volumes:
-      - shared_data:/app/data
+      - "8000:80"
+    depends_on:
+      - gateway-app
+    networks:
+      - app_network
+
+  backend-worker:
+    build:
+      context: .
+      dockerfile: docker/backend-worker.Dockerfile
+    depends_on:
+      - rabbitmq
     networks:
       - app_network
 
@@ -21,9 +45,9 @@ services:
     ports:
       - "8501:8501"
     depends_on:
-      - backend
+      - api-gateway
     environment:
-      - BACKEND_URL=http://backend:8000
+      - BACKEND_URL=http://api-gateway
     networks:
       - app_network
 
@@ -34,9 +58,9 @@ services:
     ports:
       - "8502:8502"
     depends_on:
-      - backend
+      - api-gateway
     environment:
-      - BACKEND_URL=http://backend:8000
+      - BACKEND_URL=http://api-gateway
     networks:
       - app_network
 
