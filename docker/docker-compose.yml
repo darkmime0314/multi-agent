@@ -3,9 +3,17 @@ version: '3.8'
 services:
   rabbitmq:
     image: rabbitmq:3-management
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
     ports:
       - "5672:5672"
       - "15672:15672"
+    healthcheck:
+      test: rabbitmq-diagnostics -q ping
+      interval: 30s
+      timeout: 30s
+      retries: 3        
     networks:
       - app_network
 
@@ -13,8 +21,13 @@ services:
     build:
       context: ..
       dockerfile: docker/gateway-app.Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
     depends_on:
-      - rabbitmq
+      rabbitmq:
+        condition: service_healthy
     networks:
       - app_network
 
@@ -23,7 +36,7 @@ services:
       context: ..
       dockerfile: docker/api-gateway.Dockerfile
     ports:
-      - "8000:80"
+      - "80:80"
     depends_on:
       - gateway-app
     networks:
@@ -33,8 +46,11 @@ services:
     build:
       context: ..
       dockerfile: docker/backend-worker.Dockerfile
+    environment:
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/      
     depends_on:
-      - rabbitmq
+      rabbitmq:
+        condition: service_healthy
     networks:
       - app_network
 

@@ -129,7 +129,7 @@ def main():
     st.markdown("---")
     
     # API 클라이언트 초기화
-    api_client = AdminAPIClient("http://localhost:8000")
+    api_client = AdminAPIClient("http://localhost:80")
     
     # 탭 생성
     tab1, tab2, tab3, tab4 = st.tabs(["📊 대시보드", "🔧 도구 관리", "🤖 에이전트 관리", "📈 모니터링"])
@@ -382,7 +382,7 @@ def main():
         with col1:
             st.write("**서버 상태:**")
             try:
-                health_response = requests.get("http://localhost:8000/health", timeout=5)
+                health_response = requests.get("http://localhost:80/health", timeout=5)
                 if health_response.status_code == 200:
                     st.success("✅ 백엔드 서버 정상")
                     health_data = health_response.json()
