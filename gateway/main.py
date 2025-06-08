@@ -12,7 +12,7 @@ class ChatRequest(BaseModel):
 
 @app.on_event("startup")
 async def startup():
-    app.state.connection = await connect_robust("amqp://guest:guest@rabbitmq/")
+    app.state.connection = await connect_robust("amqp://guest:guest@rabbitmq:5672/")
     channel = await app.state.connection.channel()
     app.state.rpc = await RPC.create(channel)
 

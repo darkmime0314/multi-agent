@@ -16,7 +16,7 @@ async def handle_user_chat(message: str) -> str:
     return full
 
 async def main():
-    connection = await connect_robust("amqp://guest:guest@rabbitmq/")
+    connection = await connect_robust("amqp://guest:guest@rabbitmq:5672/")
     channel = await connection.channel()
     rpc = await RPC.create(channel)
     await rpc.register("user_chat", handle_user_chat, auto_delete=True)
