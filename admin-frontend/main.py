@@ -129,7 +129,7 @@ def main():
     st.markdown("---")
     
     # API 클라이언트 초기화
-    api_client = AdminAPIClient("http://localhost:80")
+    api_client = AdminAPIClient("http://api-gateway:80")
     
     # 탭 생성
     tab1, tab2, tab3, tab4 = st.tabs(["📊 대시보드", "🔧 도구 관리", "🤖 에이전트 관리", "📈 모니터링"])

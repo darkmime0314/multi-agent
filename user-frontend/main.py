@@ -100,7 +100,7 @@ def main():
             full_response = ""
             
             # 웹소켓 클라이언트 생성 및 연결
-            client = UserWebSocketClient("ws://localhost:80/api/user/chat")
+            client = UserWebSocketClient("ws://api-gateway:80/api/user/chat")
             
             if client.connect():
                 # 메시지 전송
@@ -135,7 +135,7 @@ def main():
         try:
             import requests
             response = requests.get(
-                "http://localhost:80/api/user/status",
+                "http://api-gateway:80/api/user/status",
                 headers={"Authorization": "Bearer user_token"},
                 timeout=5
             )
