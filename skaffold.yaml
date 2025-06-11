@@ -17,7 +17,6 @@ build:
       context: .
       docker:
         dockerfile: docker/admin-frontend.Dockerfile
-
 deploy:
   kubectl:
     manifests:
@@ -25,5 +24,15 @@ deploy:
       - k8s/backend-config.yaml
       - k8s/admin-frontend.yaml
       - k8s/user-frontend.yaml
-      - k8s/ingress.yaml
+
+profiles:
+  - name: with-ingress
+    deploy:
+      kubectl:
+        manifests:
+          - k8s/backend.yaml
+          - k8s/backend-config.yaml
+          - k8s/admin-frontend.yaml
+          - k8s/user-frontend.yaml
+          - k8s/ingress.yaml
 

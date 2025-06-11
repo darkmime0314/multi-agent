@@ -4,5 +4,5 @@ metadata:
   name: admin-frontend-config
 spec:
   healthCheck:
-    requestPath: /admin
+    requestPath: /admin/
     port: 8501
