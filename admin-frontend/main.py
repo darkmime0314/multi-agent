@@ -1,4 +1,3 @@
-
 import streamlit as st
 import requests
 import json
@@ -15,14 +14,15 @@ class AdminAPIClient:
     
     def __init__(self, base_url: str):
         self.base_url = base_url
-        self.headers = {"Authorization": "Bearer admin_token"}
+        self.headers = {"Content-Type": "application/json"}
     
     def get_tools(self) -> List[Dict]:
         """도구 목록 조회"""
         try:
             response = requests.get(f"{self.base_url}/api/admin/tools", headers=self.headers)
             response.raise_for_status()
-            return response.json().get("tools", [])
+            data = response.json()
+            return data.get("tools", [])
         except Exception as e:
             st.error(f"도구 조회 실패: {e}")
             return []
@@ -33,7 +33,13 @@ class AdminAPIClient:
             data = {"name": name, "config": config}
             response = requests.post(f"{self.base_url}/api/admin/tools", headers=self.headers, json=data)
             response.raise_for_status()
-            return True
+            result = response.json()
+            if result.get("success"):
+                st.success(result.get("message", "도구가 추가되었습니다."))
+                return True
+            else:
+                st.error(result.get("message", "도구 추가 실패"))
+                return False
         except Exception as e:
             st.error(f"도구 추가 실패: {e}")
             return False
@@ -43,7 +49,13 @@ class AdminAPIClient:
         try:
             response = requests.delete(f"{self.base_url}/api/admin/tools/{name}", headers=self.headers)
             response.raise_for_status()
-            return True
+            result = response.json()
+            if result.get("success"):
+                st.success(result.get("message", "도구가 삭제되었습니다."))
+                return True
+            else:
+                st.error(result.get("message", "도구 삭제 실패"))
+                return False
         except Exception as e:
             st.error(f"도구 삭제 실패: {e}")
             return False
@@ -53,7 +65,13 @@ class AdminAPIClient:
         try:
             response = requests.post(f"{self.base_url}/api/admin/tools/apply", headers=self.headers)
             response.raise_for_status()
-            return True
+            result = response.json()
+            if result.get("success"):
+                st.success(result.get("message", "변경사항이 적용되었습니다."))
+                return True
+            else:
+                st.error(result.get("message", "변경사항 적용 실패"))
+                return False
         except Exception as e:
             st.error(f"변경사항 적용 실패: {e}")
             return False
@@ -84,7 +102,13 @@ class AdminAPIClient:
             data = {"model_name": model_name}
             response = requests.post(f"{self.base_url}/api/admin/agent/reinitialize", headers=self.headers, json=data)
             response.raise_for_status()
-            return True
+            result = response.json()
+            if result.get("success"):
+                st.success(result.get("message", "에이전트가 재초기화되었습니다."))
+                return True
+            else:
+                st.error(result.get("message", "에이전트 재초기화 실패"))
+                return False
         except Exception as e:
             st.error(f"에이전트 재초기화 실패: {e}")
             return False
@@ -190,7 +214,6 @@ def main():
             st.subheader("🔄 빠른 액션")
             if st.button("🔄 에이전트 재시작", use_container_width=True):
                 if api_client.apply_changes():
-                    st.success("에이전트가 재시작되었습니다!")
                     st.rerun()
             
             if st.button("📊 상태 새로고침", use_container_width=True):
@@ -204,7 +227,7 @@ def main():
         
         # 현재 도구 목록
         tools = api_client.get_tools()
-        print(tools)
+        
         col1, col2 = st.columns([2, 1])
         
         with col1:
@@ -223,13 +246,12 @@ def main():
                                 st.write(f"**URL:** {tool['url']}")
                             
                             # JSON 설정 표시
-                            # with st.expander("JSON 설정 보기"):
-                            #     st.json(tool.get('config', {}))
+                            with st.expander("JSON 설정 보기"):
+                                st.json(tool.get('config', {}))
                         
                         with col_action:
                             if st.button("❌ 삭제", key=f"delete_{tool['name']}"):
                                 if api_client.delete_tool(tool['name']):
-                                    st.success(f"도구 '{tool['name']}'이 삭제되었습니다!")
                                     st.rerun()
             else:
                 st.info("등록된 도구가 없습니다.")
@@ -290,7 +312,6 @@ def main():
                             }
                         
                         if api_client.add_tool(tool_name, config):
-                            st.success("도구가 성공적으로 추가되었습니다!")
                             st.rerun()
                             
                     except json.JSONDecodeError:
@@ -306,7 +327,6 @@ def main():
             if st.button("🔄 변경사항 적용", use_container_width=True, type="primary"):
                 with st.spinner("에이전트 재초기화 중..."):
                     if api_client.apply_changes():
-                        st.success("변경사항이 에이전트에 적용되었습니다!")
                         st.rerun()
     
     # =============================================================================
@@ -354,7 +374,6 @@ def main():
                 if st.form_submit_button("에이전트 재초기화", use_container_width=True):
                     with st.spinner("에이전트 재초기화 중..."):
                         if api_client.reinitialize_agent(selected_model):
-                            st.success("에이전트가 성공적으로 재초기화되었습니다!")
                             st.rerun()
         
         st.markdown("---")
@@ -382,7 +401,7 @@ def main():
         with col1:
             st.write("**서버 상태:**")
             try:
-                health_response = requests.get("http://localhost:80/health", timeout=5)
+                health_response = requests.get("http://api-gateway:80/health", timeout=5)
                 if health_response.status_code == 200:
                     st.success("✅ 백엔드 서버 정상")
                     health_data = health_response.json()
@@ -414,6 +433,7 @@ def main():
         
         # 자동 새로고침
         if auto_refresh:
+            import time
             time.sleep(10)
             st.rerun()
 

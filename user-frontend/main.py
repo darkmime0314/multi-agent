@@ -1,8 +1,7 @@
 import streamlit as st
-import websocket
+import requests
 import json
-import threading
-import time
+import uuid
 from typing import Optional
 
 st.set_page_config(
@@ -11,66 +10,51 @@ st.set_page_config(
     layout="wide"
 )
 
-class UserWebSocketClient:
-    """사용자용 웹소켓 클라이언트"""
+class ChatAPIClient:
+    """채팅 API 클라이언트"""
     
-    def __init__(self, url: str):
-        self.url = url
-        self.ws = None
-        self.is_connected = False
-        self.response_buffer = ""
+    def __init__(self, base_url: str):
+        self.base_url = base_url
+        self.headers = {"Content-Type": "application/json"}
         
-    def connect(self):
-        """웹소켓 연결"""
-        try:
-            self.ws = websocket.create_connection(self.url)
-            self.is_connected = True
-            return True
-        except Exception as e:
-            st.error(f"연결 실패: {e}")
-            return False
-    
-    def send_message(self, message: str, thread_id: str = "default"):
-        """메시지 전송"""
-        if not self.is_connected:
-            return False
-            
+    def send_message(self, message: str, thread_id: str = "default") -> dict:
+        """동기식 채팅 메시지 전송"""
         try:
             data = {
                 "message": message,
                 "thread_id": thread_id
             }
-            self.ws.send(json.dumps(data))
-            return True
+            response = requests.post(
+                f"{self.base_url}/api/chat",
+                headers=self.headers,
+                json=data,
+                timeout=60
+            )
+            response.raise_for_status()
+            return response.json()
         except Exception as e:
-            st.error(f"메시지 전송 실패: {e}")
-            return False
+            return {
+                "success": False,
+                "error": str(e),
+                "message": f"오류가 발생했습니다: {e}"
+            }
     
-    def receive_response(self) -> Optional[str]:
-        """응답 수신"""
-        if not self.is_connected:
-            return None
-            
+    def get_status(self) -> dict:
+        """사용자 상태 조회"""
         try:
-            response = self.ws.recv()
-            data = json.loads(response)
-            
-            if data.get("type") == "response_chunk":
-                return data.get("data", "")
-            elif data.get("type") == "response_complete":
-                return None  # 완료 신호
-            elif data.get("type") == "error":
-                st.error(data.get("data", "알 수 없는 오류"))
-                return None
+            response = requests.get(
+                f"{self.base_url}/api/status",
+                headers=self.headers,
+                timeout=5
+            )
+            response.raise_for_status()
+            return response.json()
         except Exception as e:
-            st.error(f"응답 수신 실패: {e}")
-            return None
-    
-    def close(self):
-        """연결 종료"""
-        if self.ws:
-            self.ws.close()
-        self.is_connected = False
+            return {
+                "error": str(e),
+                "agent_ready": False,
+                "tools_available": 0
+            }
 
 def main():
     st.title("🤖 AI Assistant")
@@ -80,7 +64,10 @@ def main():
     if "messages" not in st.session_state:
         st.session_state.messages = []
     if "thread_id" not in st.session_state:
-        st.session_state.thread_id = "default"
+        st.session_state.thread_id = str(uuid.uuid4())
+    
+    # API 클라이언트 초기화
+    api_client = ChatAPIClient("http://api-gateway:80")
     
     # 채팅 기록 표시
     for message in st.session_state.messages:
@@ -96,58 +83,57 @@ def main():
         
         # AI 응답
         with st.chat_message("assistant"):
-            response_placeholder = st.empty()
-            full_response = ""
-            
-            # 웹소켓 클라이언트 생성 및 연결
-            client = UserWebSocketClient("ws://api-gateway:80/api/user/chat")
-            
-            if client.connect():
-                # 메시지 전송
-                if client.send_message(prompt, st.session_state.thread_id):
-                    # 스트리밍 응답 수신
-                    while True:
-                        chunk = client.receive_response()
-                        if chunk is None:  # 완료 또는 오류
-                            break
-                        
-                        full_response += chunk
-                        response_placeholder.markdown(full_response + "▌")
-                        time.sleep(0.01)  # 부드러운 스트리밍 효과
-                    
-                    response_placeholder.markdown(full_response)
+            with st.spinner("응답을 생성하고 있습니다..."):
+                response = api_client.send_message(prompt, st.session_state.thread_id)
                 
-                client.close()
-            else:
-                response_placeholder.markdown("❌ 연결 실패. 서버가 실행 중인지 확인하세요.")
-                full_response = "연결 실패"
-        
-        # AI 응답 저장
-        if full_response:
-            st.session_state.messages.append({"role": "assistant", "content": full_response})
+                if response.get("success"):
+                    ai_message = response.get("message", "응답을 받지 못했습니다.")
+                    st.markdown(ai_message)
+                    # AI 응답 저장
+                    st.session_state.messages.append({"role": "assistant", "content": ai_message})
+                else:
+                    error_message = response.get("message", response.get("error", "알 수 없는 오류가 발생했습니다."))
+                    st.error(error_message)
+                    # 에러 메시지도 기록에 저장
+                    st.session_state.messages.append({"role": "assistant", "content": f"❌ {error_message}"})
 
-    # 사이드바에 간단한 정보
+    # 사이드바에 상태 정보
     with st.sidebar:
         st.header("📊 상태")
+        
         if st.button("🔄 새로고침"):
             st.rerun()
         
-        try:
-            import requests
-            response = requests.get(
-                "http://api-gateway:80/api/user/status",
-                headers={"Authorization": "Bearer user_token"},
-                timeout=5
-            )
-            if response.status_code == 200:
-                status = response.json()
-                st.success("✅ 서버 연결됨")
-                st.info(f"🤖 에이전트: {'준비됨' if status['agent_ready'] else '초기화 중'}")
-                st.info(f"🛠️ 도구: {status['tools_available']}개")
-            else:
-                st.error("❌ 서버 오류")
-        except:
+        if st.button("🗑️ 대화 초기화"):
+            st.session_state.messages = []
+            st.session_state.thread_id = str(uuid.uuid4())
+            st.rerun()
+        
+        st.markdown("---")
+        
+        # 서버 상태 확인
+        status = api_client.get_status()
+        
+        if "error" not in status:
+            st.success("✅ 서버 연결됨")
+            st.info(f"🤖 에이전트: {'준비됨' if status.get('agent_ready', False) else '초기화 중'}")
+            st.info(f"🛠️ 도구: {status.get('tools_available', 0)}개")
+        else:
             st.error("❌ 서버 연결 실패")
+            st.error(f"오류: {status.get('error', '알 수 없는 오류')}")
+        
+        st.markdown("---")
+        
+        # 대화 통계
+        st.subheader("💬 대화 통계")
+        total_messages = len(st.session_state.messages)
+        user_messages = len([m for m in st.session_state.messages if m["role"] == "user"])
+        ai_messages = len([m for m in st.session_state.messages if m["role"] == "assistant"])
+        
+        st.write(f"총 메시지: {total_messages}")
+        st.write(f"사용자 메시지: {user_messages}")
+        st.write(f"AI 응답: {ai_messages}")
+        st.write(f"현재 스레드: {st.session_state.thread_id[:8]}...")
 
 if __name__ == "__main__":
     main()

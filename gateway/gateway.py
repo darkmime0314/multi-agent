@@ -83,13 +83,143 @@ class WebSocketManager:
 websocket_manager = WebSocketManager()
 queue_manager = None
 
+async def safe_queue_call(queue_name: str, message: Dict[str, Any], timeout: int = 10) -> Dict[str, Any]:
+    """안전한 큐 호출 래퍼"""
+    global queue_manager
+    
+    try:
+        # 큐 매니저 초기화 확인
+        if queue_manager is None:
+            logger.warning("큐 매니저가 초기화되지 않음, 재초기화 시도")
+            queue_manager = QueueManager()
+            await queue_manager.initialize()
+        
+        # RPC 호출
+        response = await send_to_queue(queue_name, message, timeout)
+        logger.info(f"큐 호출 성공: {queue_name}")
+        return response
+        
+    except Exception as e:
+        logger.error(f"큐 호출 실패 ({queue_name}): {str(e)}")
+        # 상세 에러 정보 로깅
+        import traceback
+        logger.error(f"큐 호출 상세 에러:\n{traceback.format_exc()}")
+        
+        # 백엔드 응답 대신 기본 응답 반환
+        if "timeout" in str(e).lower() or "connection" in str(e).lower() or "channel" in str(e).lower():
+            logger.warning(f"백엔드 연결 문제로 기본 응답 반환: {queue_name}")
+            return _get_default_response(queue_name, message)
+        
+        # 기본 에러 응답 반환
+        return {
+            "success": False,
+            "error": f"Queue communication failed: {str(e)}",
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+def _get_default_response(queue_name: str, message: Dict[str, Any]) -> Dict[str, Any]:
+    """백엔드 연결 실패 시 기본 응답 반환"""
+    action = message.get("action", "")
+    msg_type = message.get("type", "")
+    
+    # Admin 큐 응답
+    if queue_name == "admin_queue":
+        if action == "get_tools":
+            return {
+                "success": True,
+                "tools": [],
+                "count": 0,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        elif action == "get_agent_status":
+            return {
+                "success": True,
+                "status": {
+                    "is_initialized": False,
+                    "model_name": "Backend Disconnected",
+                    "tools_count": 0,
+                    "mcp_client_active": False
+                },
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        elif action == "get_stats":
+            return {
+                "success": True,
+                "stats": {
+                    "active_tools": 0,
+                    "agent_initialized": False,
+                    "model_name": "Backend Disconnected",
+                    "total_conversations": 0,
+                    "daily_users": 0,
+                    "system_uptime": datetime.utcnow().isoformat(),
+                    "queue_status": "disconnected"
+                },
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        elif action in ["create_tool", "update_tool", "delete_tool", "apply_changes", "reinitialize_agent"]:
+            return {
+                "success": False,
+                "message": "백엔드 서버에 연결할 수 없습니다. 나중에 다시 시도해주세요.",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        elif action == "get_system_info":
+            return {
+                "success": True,
+                "system_info": {
+                    "service_name": "LangGraph MCP Agents Backend",
+                    "version": "2.0.0",
+                    "status": "disconnected"
+                },
+                "timestamp": datetime.utcnow().isoformat()
+            }
+    
+    # Status 큐 응답
+    elif queue_name == "status_queue":
+        if msg_type == "user_status":
+            return {
+                "agent_ready": False,
+                "tools_available": 0,
+                "error": "Backend disconnected",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        elif msg_type == "get_threads":
+            return {
+                "threads": [],
+                "count": 0,
+                "error": "Backend disconnected",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+    
+    # Chat 큐 응답
+    elif queue_name == "chat_queue":
+        return {
+            "success": False,
+            "error": "백엔드 서버에 연결할 수 없습니다. 잠시 후 다시 시도해주세요.",
+            "message": "죄송합니다. 현재 AI 서비스에 일시적인 문제가 발생했습니다.",
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    
+    # 기본 응답
+    return {
+        "success": False,
+        "error": "Backend service unavailable",
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
 @app.on_event("startup")
 async def startup_event():
     """앱 시작 시 초기화"""
     global queue_manager
     try:
+        logger.info("API Gateway 초기화 시작...")
+        
+        # 큐 매니저 초기화
         queue_manager = QueueManager()
-        await queue_manager.initialize()
+        success = await queue_manager.initialize()
+        
+        if not success:
+            logger.error("큐 매니저 초기화 실패")
+            return
         
         # WebSocket 응답 처리를 위한 컨슈머 시작
         consumer = queue_manager.get_consumer()
@@ -97,8 +227,11 @@ async def startup_event():
         await consumer.start_consuming()
         
         logger.info("✅ API Gateway 초기화 완료")
+        
     except Exception as e:
         logger.error(f"❌ API Gateway 초기화 실패: {e}")
+        import traceback
+        logger.error(f"초기화 상세 에러:\n{traceback.format_exc()}")
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -139,17 +272,18 @@ async def health_check():
     """헬스 체크"""
     try:
         # 백엔드 상태 확인
-        status_response = await send_to_queue("status_queue", {
+        status_response = await safe_queue_call("status_queue", {
             "type": "user_status"
         }, timeout=5)
         
         return {
             "status": "healthy",
-            "backend_connected": True,
+            "backend_connected": status_response.get("success", True),
             "agent_ready": status_response.get("agent_ready", False),
             "timestamp": datetime.utcnow().isoformat()
         }
     except Exception as e:
+        logger.error(f"헬스체크 실패: {e}")
         return {
             "status": "unhealthy",
             "backend_connected": False,
@@ -163,7 +297,9 @@ async def health_check():
 async def chat_endpoint(request: ChatRequest):
     """HTTP 채팅 엔드포인트 (동기식)"""
     try:
-        response = await send_to_queue("chat_queue", {
+        logger.info(f"채팅 요청 수신: {request.message[:50]}...")
+        
+        response = await safe_queue_call("chat_queue", {
             "type": "chat_http",
             "data": {
                 "message": request.message,
@@ -179,13 +315,14 @@ async def chat_endpoint(request: ChatRequest):
                 timestamp=response.get("timestamp", datetime.utcnow().isoformat())
             )
         else:
-            raise HTTPException(
-                status_code=500,
-                detail=response.get("error", "채팅 처리 실패")
-            )
+            error_msg = response.get("error", "채팅 처리 실패")
+            logger.error(f"채팅 처리 실패: {error_msg}")
+            raise HTTPException(status_code=500, detail=error_msg)
             
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"채팅 처리 실패: {e}")
+        logger.error(f"채팅 엔드포인트 예외: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/chat/stream")
@@ -206,10 +343,7 @@ async def chat_stream_endpoint(message: str, thread_id: str = "default"):
             })
             
             # 응답 대기 및 스트리밍
-            # 실제 구현에서는 별도의 응답 큐를 모니터링해야 함
             yield f"data: {json.dumps({'type': 'start', 'thread_id': thread_id})}\n\n"
-            
-            # 임시 응답 (실제로는 백엔드에서 스트리밍 데이터를 받아야 함)
             yield f"data: {json.dumps({'type': 'response_chunk', 'data': '응답 처리 중...', 'thread_id': thread_id})}\n\n"
             yield f"data: {json.dumps({'type': 'response_complete', 'thread_id': thread_id})}\n\n"
             
@@ -273,23 +407,36 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
 async def get_tools():
     """도구 목록 조회"""
     try:
-        response = await send_to_queue("admin_queue", {
+        logger.info("도구 목록 조회 요청")
+        
+        response = await safe_queue_call("admin_queue", {
             "action": "get_tools"
         }, timeout=10)
         
         if response.get("success"):
-            return response
+            return {
+                "tools": response.get("tools", []),
+                "count": response.get("count", 0),
+                "timestamp": response.get("timestamp")
+            }
         else:
-            raise HTTPException(status_code=500, detail="도구 목록 조회 실패")
+            error_msg = response.get("error", "도구 목록 조회 실패")
+            logger.error(f"도구 목록 조회 실패: {error_msg}")
+            raise HTTPException(status_code=500, detail=error_msg)
             
+    except HTTPException:
+        raise
     except Exception as e:
+        logger.error(f"도구 목록 조회 예외: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/admin/tools")
 async def create_tool(request: ToolCreateRequest):
     """도구 생성"""
     try:
-        response = await send_to_queue("admin_queue", {
+        logger.info(f"도구 생성 요청: {request.name}")
+        
+        response = await safe_queue_call("admin_queue", {
             "action": "create_tool",
             "data": {
                 "name": request.name,
@@ -299,18 +446,27 @@ async def create_tool(request: ToolCreateRequest):
         }, timeout=10)
         
         if response.get("success"):
-            return response
+            return {
+                "success": True,
+                "message": response.get("message"),
+                "timestamp": response.get("timestamp")
+            }
         else:
-            raise HTTPException(status_code=400, detail=response.get("message"))
+            error_msg = response.get("message", "도구 생성 실패")
+            logger.error(f"도구 생성 실패: {error_msg}")
+            raise HTTPException(status_code=400, detail=error_msg)
             
+    except HTTPException:
+        raise
     except Exception as e:
+        logger.error(f"도구 생성 예외: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.put("/api/admin/tools/{tool_name}")
 async def update_tool(tool_name: str, request: ToolUpdateRequest):
     """도구 수정"""
     try:
-        response = await send_to_queue("admin_queue", {
+        response = await safe_queue_call("admin_queue", {
             "action": "update_tool",
             "tool_name": tool_name,
             "data": {
@@ -320,67 +476,111 @@ async def update_tool(tool_name: str, request: ToolUpdateRequest):
         }, timeout=10)
         
         if response.get("success"):
-            return response
+            return {
+                "success": True,
+                "message": response.get("message"),
+                "timestamp": response.get("timestamp")
+            }
         else:
-            raise HTTPException(status_code=400, detail=response.get("message"))
+            error_msg = response.get("message", "도구 수정 실패")
+            raise HTTPException(status_code=400, detail=error_msg)
             
+    except HTTPException:
+        raise
     except Exception as e:
+        logger.error(f"도구 수정 예외: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.delete("/api/admin/tools/{tool_name}")
 async def delete_tool(tool_name: str):
     """도구 삭제"""
     try:
-        response = await send_to_queue("admin_queue", {
+        response = await safe_queue_call("admin_queue", {
             "action": "delete_tool",
             "tool_name": tool_name
         }, timeout=10)
         
         if response.get("success"):
-            return response
+            return {
+                "success": True,
+                "message": response.get("message"),
+                "timestamp": response.get("timestamp")
+            }
         else:
-            raise HTTPException(status_code=400, detail=response.get("message"))
+            error_msg = response.get("message", "도구 삭제 실패")
+            raise HTTPException(status_code=400, detail=error_msg)
             
+    except HTTPException:
+        raise
     except Exception as e:
+        logger.error(f"도구 삭제 예외: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/admin/apply-changes")
+@app.post("/api/admin/tools/apply")
 async def apply_tool_changes():
     """도구 변경사항 적용"""
     try:
-        response = await send_to_queue("admin_queue", {
+        response = await safe_queue_call("admin_queue", {
             "action": "apply_changes"
         }, timeout=30)
         
         if response.get("success"):
-            return response
+            return {
+                "success": True,
+                "message": response.get("message"),
+                "timestamp": response.get("timestamp")
+            }
         else:
-            raise HTTPException(status_code=500, detail=response.get("message"))
+            error_msg = response.get("message", "변경사항 적용 실패")
+            raise HTTPException(status_code=500, detail=error_msg)
             
+    except HTTPException:
+        raise
     except Exception as e:
+        logger.error(f"변경사항 적용 예외: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/admin/agent/status")
 async def get_agent_status():
     """에이전트 상태 조회"""
     try:
-        response = await send_to_queue("admin_queue", {
+        logger.info("에이전트 상태 조회 요청")
+        
+        response = await safe_queue_call("admin_queue", {
             "action": "get_agent_status"
         }, timeout=10)
         
         if response.get("success"):
-            return response
+            return response.get("status", {})
         else:
-            raise HTTPException(status_code=500, detail="에이전트 상태 조회 실패")
+            error_msg = response.get("error", "에이전트 상태 조회 실패")
+            logger.error(f"에이전트 상태 조회 실패: {error_msg}")
+            
+            # 기본 상태 반환
+            return {
+                "is_initialized": False,
+                "model_name": "Unknown",
+                "tools_count": 0,
+                "mcp_client_active": False,
+                "error": error_msg
+            }
             
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"에이전트 상태 조회 예외: {e}")
+        # 에러가 발생해도 기본 상태 반환
+        return {
+            "is_initialized": False,
+            "model_name": "Unknown",
+            "tools_count": 0,
+            "mcp_client_active": False,
+            "error": str(e)
+        }
 
 @app.post("/api/admin/agent/reinitialize")
 async def reinitialize_agent(request: AgentReinitRequest):
     """에이전트 재초기화"""
     try:
-        response = await send_to_queue("admin_queue", {
+        response = await safe_queue_call("admin_queue", {
             "action": "reinitialize_agent",
             "data": {
                 "model_name": request.model_name,
@@ -389,43 +589,77 @@ async def reinitialize_agent(request: AgentReinitRequest):
         }, timeout=30)
         
         if response.get("success"):
-            return response
+            return {
+                "success": True,
+                "message": response.get("message"),
+                "timestamp": response.get("timestamp")
+            }
         else:
-            raise HTTPException(status_code=500, detail=response.get("message"))
+            error_msg = response.get("message", "에이전트 재초기화 실패")
+            raise HTTPException(status_code=500, detail=error_msg)
             
+    except HTTPException:
+        raise
     except Exception as e:
+        logger.error(f"에이전트 재초기화 예외: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/admin/stats")
 async def get_admin_stats():
     """관리자 통계"""
     try:
-        response = await send_to_queue("admin_queue", {
+        logger.info("통계 조회 요청")
+        
+        response = await safe_queue_call("admin_queue", {
             "action": "get_stats"
         }, timeout=10)
         
         if response.get("success"):
-            return response
+            return response.get("stats", {})
         else:
-            raise HTTPException(status_code=500, detail="통계 조회 실패")
+            error_msg = response.get("error", "통계 조회 실패")
+            logger.error(f"통계 조회 실패: {error_msg}")
+            
+            # 기본 통계 반환
+            return {
+                "active_tools": 0,
+                "agent_initialized": False,
+                "model_name": "Unknown",
+                "total_conversations": 0,
+                "daily_users": 0,
+                "error": error_msg
+            }
             
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"통계 조회 예외: {e}")
+        # 에러가 발생해도 기본 통계 반환
+        return {
+            "active_tools": 0,
+            "agent_initialized": False,
+            "model_name": "Unknown", 
+            "total_conversations": 0,
+            "daily_users": 0,
+            "error": str(e)
+        }
 
 @app.get("/api/admin/system")
 async def get_system_info():
     """시스템 정보"""
     try:
-        response = await send_to_queue("admin_queue", {
+        response = await safe_queue_call("admin_queue", {
             "action": "get_system_info"
         }, timeout=10)
         
         if response.get("success"):
-            return response
+            return response.get("system_info", {})
         else:
-            raise HTTPException(status_code=500, detail="시스템 정보 조회 실패")
+            error_msg = response.get("error", "시스템 정보 조회 실패")
+            raise HTTPException(status_code=500, detail=error_msg)
             
+    except HTTPException:
+        raise
     except Exception as e:
+        logger.error(f"시스템 정보 조회 예외: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # ==================== 사용자 API ====================
@@ -434,15 +668,18 @@ async def get_system_info():
 async def get_user_status():
     """사용자 상태"""
     try:
-        response = await send_to_queue("status_queue", {
+        response = await safe_queue_call("status_queue", {
             "type": "user_status"
         }, timeout=5)
         
         return response
         
     except Exception as e:
+        logger.error(f"사용자 상태 조회 예외: {e}")
         return {
             "error": str(e),
+            "agent_ready": False,
+            "tools_available": 0,
             "timestamp": datetime.utcnow().isoformat()
         }
 
@@ -450,15 +687,18 @@ async def get_user_status():
 async def get_user_threads():
     """사용자 스레드 목록"""
     try:
-        response = await send_to_queue("status_queue", {
+        response = await safe_queue_call("status_queue", {
             "type": "get_threads"
         }, timeout=10)
         
         return response
         
     except Exception as e:
+        logger.error(f"스레드 목록 조회 예외: {e}")
         return {
             "error": str(e),
+            "threads": [],
+            "count": 0,
             "timestamp": datetime.utcnow().isoformat()
         }
 
@@ -468,6 +708,9 @@ async def get_user_threads():
 async def global_exception_handler(request: Request, exc: Exception):
     """전역 예외 처리"""
     logger.error(f"Global exception: {exc}")
+    import traceback
+    logger.error(f"Global exception traceback:\n{traceback.format_exc()}")
+    
     return JSONResponse(
         status_code=500,
         content={

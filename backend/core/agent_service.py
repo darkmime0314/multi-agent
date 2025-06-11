@@ -32,6 +32,7 @@ class MCPAgentService:
             # MCP 설정 로드
             if mcp_config is None:
                 mcp_config = self.load_mcp_config()
+            
             # MCP 클라이언트 초기화
             if mcp_config and mcp_config.get("mcpServers"):
                 self.mcp_client = MultiServerMCPClient(mcp_config["mcpServers"])
@@ -111,6 +112,35 @@ Use the available tools when necessary to provide accurate and helpful responses
         except Exception as e:
             print(f"시스템 프롬프트 로드 실패: {e}")
             return "You are a helpful AI assistant."
+    
+    async def chat(self, message: str, thread_id: str = "default") -> str:
+        """동기식 채팅 응답"""
+        if not self.agent:
+            return "에이전트가 초기화되지 않았습니다."
+            
+        try:
+            config = {"configurable": {"thread_id": thread_id}}
+            
+            # 에이전트에 메시지 전송
+            result = await self.agent.ainvoke(
+                {"messages": [{"role": "user", "content": message}]},
+                config=config
+            )
+            
+            # 마지막 AI 메시지 추출
+            if "messages" in result:
+                for msg in reversed(result["messages"]):
+                    if hasattr(msg, 'content') and msg.content and getattr(msg, 'type', None) == 'ai':
+                        return msg.content
+                    elif isinstance(msg, dict) and msg.get('type') == 'ai':
+                        return msg.get('content', '')
+            
+            return "응답을 생성할 수 없습니다."
+            
+        except asyncio.TimeoutError:
+            return "응답 시간이 초과되었습니다."
+        except Exception as e:
+            return f"오류가 발생했습니다: {str(e)}"
     
     async def chat_stream(self, message: str, thread_id: str = "default") -> AsyncGenerator[str, None]:
         """스트리밍 채팅 응답"""
