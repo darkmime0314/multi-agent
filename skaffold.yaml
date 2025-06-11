@@ -22,6 +22,7 @@ deploy:
   kubectl:
     manifests:
       - k8s/backend.yaml
+      - k8s/backend-config.yaml
       - k8s/admin-frontend.yaml
       - k8s/user-frontend.yaml
       - k8s/ingress.yaml
