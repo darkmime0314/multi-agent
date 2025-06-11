@@ -1,4 +1,5 @@
 
+import os
 import streamlit as st
 import requests
 import json
@@ -9,6 +10,9 @@ st.set_page_config(
     page_icon="⚙️",
     layout="wide"
 )
+
+# 백엔드 접속 URL (환경 변수로 설정 가능)
+BACKEND_URL = os.getenv("BACKEND_URL", "http://backend:8000")
 
 class AdminAPIClient:
     """운영자용 API 클라이언트"""
@@ -166,7 +170,7 @@ def main():
     st.markdown("---")
 
     # API 클라이언트 초기화
-    api_client = AdminAPIClient("http://localhost:8000")
+    api_client = AdminAPIClient(BACKEND_URL)
 
     # ----------------------------------------------------------------------
     # 사이드바: 필터 규칙 관리 UI
@@ -481,7 +485,7 @@ def main():
         with col1:
             st.write("**서버 상태:**")
             try:
-                health_response = requests.get("http://localhost:8000/health", timeout=5)
+                health_response = requests.get(f"{BACKEND_URL}/health", timeout=5)
                 if health_response.status_code == 200:
                     st.success("✅ 백엔드 서버 정상")
                     health_data = health_response.json()

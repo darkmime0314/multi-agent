@@ -1,3 +1,4 @@
+import os
 import streamlit as st
 import websocket
 import json
@@ -10,6 +11,10 @@ st.set_page_config(
     page_icon="🤖",
     layout="wide"
 )
+
+# 백엔드 접속 URL 설정
+BACKEND_URL = os.getenv("BACKEND_URL", "http://backend:8000")
+BACKEND_WS_URL = BACKEND_URL.replace("http://", "ws://").replace("https://", "wss://")
 
 class UserWebSocketClient:
     """사용자용 웹소켓 클라이언트"""
@@ -100,7 +105,7 @@ def main():
             full_response = ""
             
             # 웹소켓 클라이언트 생성 및 연결
-            client = UserWebSocketClient("ws://localhost:8000/api/user/chat")
+            client = UserWebSocketClient(f"{BACKEND_WS_URL}/api/user/chat")
             
             if client.connect():
                 # 메시지 전송
@@ -135,7 +140,7 @@ def main():
         try:
             import requests
             response = requests.get(
-                "http://localhost:8000/api/user/status",
+                f"{BACKEND_URL}/api/user/status",
                 headers={"Authorization": "Bearer user_token"},
                 timeout=5
             )

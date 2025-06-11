@@ -26,7 +26,7 @@ def run_user_frontend():
 
     os.chdir(frontend_path)
     # os.chdir('user-frontend')
-    subprocess.run(['streamlit', 'run', 'main.py', '--server.port=8501'])
+    subprocess.run(['streamlit', 'run', 'main.py', '--server.port=8502'])
 
 def run_admin_frontend():
     base_dir = os.path.dirname(__file__)        # => d:\Architect과정\팀과제\multi-agent\test
@@ -39,7 +39,7 @@ def run_admin_frontend():
     os.chdir(admin_path)
     # os.chdir('admin-frontend')
 
-    subprocess.run(['streamlit', 'run', 'main.py', '--server.port=8502'])
+    subprocess.run(['streamlit', 'run', 'main.py', '--server.port=8501'])
 
 def main():
     print("🚀 LangGraph MCP 에이전트 시스템 시작...")
@@ -56,8 +56,8 @@ def main():
         
         print("📊 서비스 URL:")
         print("  - 백엔드 API: http://localhost:8000")
-        print("  - 사용자 인터페이스: http://localhost:8501")
-        print("  - 운영자 대시보드: http://localhost:8502")
+        print("  - 운영자 대시보드: http://localhost:8501")
+        print("  - 사용자 인터페이스: http://localhost:8502")
         
         # 모든 서비스가 종료될 때까지 대기
         backend_future.result()
@@ -66,3 +66,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=sqlite:///./shared_data.db
+    volumes:
+      - shared_data:/app/data
+    networks:
+      - app_network
+
+  user-frontend:
+    build:
+      context: .
+      dockerfile: docker/user-frontend.Dockerfile
+    ports:
+      - "8502:8502"
+    depends_on:
+      - backend
+    environment:
+      - BACKEND_URL=http://backend:8000
+    networks:
+      - app_network
+
+  admin-frontend:
+    build:
+      context: .
+      dockerfile: docker/admin-frontend.Dockerfile
+    ports:
+      - "8501:8501"
+    depends_on:
+      - backend
+    environment:
+      - BACKEND_URL=http://backend:8000
+    networks:
+      - app_network
+
+volumes:
+  shared_data:
+
+networks:
+  app_network:
+    driver: bridge

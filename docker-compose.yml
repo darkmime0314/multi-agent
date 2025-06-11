@@ -5,10 +5,11 @@ services:
     build:
       context: .
       dockerfile: docker/backend.Dockerfile
+    image: asia-docker.pkg.dev/architect-certification-289902/backend/backend:latest
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=sqlite:///./shared_data.db
+      - DATABASE_URL=postgresql://postgres:admin123@my-postgres-postgresql.database.svc.cluster.local:5432/postgres
     volumes:
       - shared_data:/app/data
     networks:
@@ -18,8 +19,9 @@ services:
     build:
       context: .
       dockerfile: docker/user-frontend.Dockerfile
+    image: asia-docker.pkg.dev/architect-certification-289902/user-frontend/user-frontend:latest
     ports:
-      - "8501:8501"
+      - "8502:8502"
     depends_on:
       - backend
     environment:
@@ -31,8 +33,9 @@ services:
     build:
       context: .
       dockerfile: docker/admin-frontend.Dockerfile
+    image: asia-docker.pkg.dev/architect-certification-289902/admin-frontend/admin-frontend:latest
     ports:
-      - "8502:8502"
+      - "8501:8501"
     depends_on:
       - backend
     environment:
@@ -46,3 +49,4 @@ volumes:
 networks:
   app_network:
     driver: bridge
+

@@ -1,0 +1,38 @@
+apiVersion: skaffold/v2beta29
+kind: Config
+
+build:
+  local:
+    push: true
+  artifacts:
+    - image: asia-docker.pkg.dev/architect-certification-289902/backend/backend
+      context: .
+      docker:
+        dockerfile: docker/backend.Dockerfile
+    - image: asia-docker.pkg.dev/architect-certification-289902/user-frontend/user-frontend
+      context: .
+      docker:
+        dockerfile: docker/user-frontend.Dockerfile
+    - image: asia-docker.pkg.dev/architect-certification-289902/admin-frontend/admin-frontend
+      context: .
+      docker:
+        dockerfile: docker/admin-frontend.Dockerfile
+deploy:
+  kubectl:
+    manifests:
+      - k8s/backend.yaml
+      - k8s/backend-config.yaml
+      - k8s/admin-frontend.yaml
+      - k8s/user-frontend.yaml
+
+profiles:
+  - name: with-ingress
+    deploy:
+      kubectl:
+        manifests:
+          - k8s/backend.yaml
+          - k8s/backend-config.yaml
+          - k8s/admin-frontend.yaml
+          - k8s/user-frontend.yaml
+          - k8s/ingress.yaml
+
