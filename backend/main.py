@@ -8,8 +8,11 @@ import json
 import asyncio
 from core.agent_service import MCPAgentService
 from core.tool_service import MCPToolService
+from core.input_filter import InputFilter
+from filter_api import router as filter_router
 
 app = FastAPI(title="LangGraph MCP Agents API", version="2.0.0")
+app.include_router(filter_router, prefix="/api/admin")
 
 # CORS 설정
 app.add_middleware(
@@ -64,6 +67,14 @@ async def websocket_chat(websocket: WebSocket):
             message_data = json.loads(data)
             message = message_data.get("message", "")
             thread_id = message_data.get("thread_id", "default")
+
+            # Filter sensitive input
+            if InputFilter.contains_sensitive(message):
+                await websocket.send_text(json.dumps({
+                    "type": "error",
+                    "data": "Sensitive information detected in input",
+                }))
+                continue
             
             # 에이전트가 초기화되지 않은 경우 자동 초기화
             if not agent_service.agent:
@@ -181,6 +192,7 @@ async def health_check():
 async def startup_event():
     """서버 시작 시 에이전트 초기화"""
     await agent_service.initialize_agent()
+    InputFilter.load_rules()
 
 
 if __name__ == "__main__":

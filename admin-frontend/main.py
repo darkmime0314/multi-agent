@@ -89,6 +89,43 @@ class AdminAPIClient:
             st.error(f"에이전트 재초기화 실패: {e}")
             return False
 
+    def load_filter_rules(self) -> List[Dict]:
+        """필터 규칙 조회"""
+        try:
+            resp = requests.get(f"{self.base_url}/api/admin/filters", headers=self.headers)
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as e:
+            st.error(f"필터 규칙 불러오기 실패: {e}")
+            return []
+
+    def save_filter_rules(self, rules: List[Dict]) -> bool:
+        """필터 규칙 저장"""
+        try:
+            resp = requests.put(
+                f"{self.base_url}/api/admin/filters",
+                headers=self.headers,
+                json=rules,
+            )
+            resp.raise_for_status()
+            return True
+        except Exception as e:
+            st.error(f"필터 규칙 저장 실패: {e}")
+            return False
+
+    def delete_filter_rule(self, rule_id: int) -> bool:
+        """필터 규칙 삭제"""
+        try:
+            resp = requests.delete(
+                f"{self.base_url}/api/admin/filters/{rule_id}",
+                headers=self.headers,
+            )
+            resp.raise_for_status()
+            return True
+        except Exception as e:
+            st.error(f"필터 규칙 삭제 실패: {e}")
+            return False
+
 def check_admin_login():
     """관리자 로그인 확인"""
     if "admin_logged_in" not in st.session_state:
@@ -127,9 +164,71 @@ def main():
             st.rerun()
     
     st.markdown("---")
-    
+
     # API 클라이언트 초기화
     api_client = AdminAPIClient("http://localhost:8000")
+
+    # ----------------------------------------------------------------------
+    # 사이드바: 필터 규칙 관리 UI
+    # ----------------------------------------------------------------------
+    with st.sidebar.expander("🛡️ Filter Settings", expanded=False):
+        st.subheader("Filter Rules")
+
+        if "pending_filter_rules" not in st.session_state:
+            st.session_state.pending_filter_rules = api_client.load_filter_rules()
+
+        with st.form("add_filter_form"):
+            new_name = st.text_input("Rule Name", "")
+            new_pattern = st.text_input("Regex Pattern", "")
+            if st.form_submit_button("➕ Add Rule"):
+                if new_name and new_pattern:
+                    st.session_state.pending_filter_rules.append({
+                        "name": new_name,
+                        "pattern": new_pattern,
+                    })
+                    st.success(f"Added rule: {new_name}")
+                    st.rerun()
+                else:
+                    st.error("Both name and pattern are required.")
+
+        st.markdown("**Current rules:**")
+        for idx, rule in enumerate(st.session_state.pending_filter_rules):
+            col1, col2, col3 = st.columns([2, 6, 1])
+            col1.write(rule.get("name", ""))
+            col2.code(rule.get("pattern", ""))
+            if col3.button("❌", key=f"del_{idx}"):
+                removed = st.session_state.pending_filter_rules.pop(idx)
+                st.success(f"Removed rule: {removed.get('name')}")
+                st.rerun()
+
+        if st.button("✅ Apply Filter Settings"):
+            if api_client.save_filter_rules(st.session_state.pending_filter_rules):
+                st.success("Filter rules have been updated.")
+            else:
+                st.error("Failed to update filter rules.")
+
+    with st.sidebar.expander("📋 Registered Filters List", expanded=True):
+        st.subheader("Saved Filter Rules")
+        try:
+            rules = api_client.load_filter_rules()
+        except Exception:
+            st.error("⚠️ Unable to load filter rules from server")
+        else:
+            if not rules:
+                st.info("No filter rules defined.")
+            for idx, rule in enumerate(rules):
+                col1, col2, col3 = st.columns([4, 7, 1])
+                name = rule.get("name", "<no name>")
+                pattern = rule.get("pattern", "<no pattern>")
+                rule_id = rule.get("id")
+                col1.markdown(f"**{name}**")
+                col2.code(pattern)
+                if col3.button("❌", key=f"srvdel_{rule_id}"):
+                    if rule_id is not None and api_client.delete_filter_rule(rule_id):
+                        st.success(f"Deleted rule: {name}")
+                    else:
+                        st.error("Failed to delete rule")
+                    st.rerun()
     
     # 탭 생성
     tab1, tab2, tab3, tab4 = st.tabs(["📊 대시보드", "🔧 도구 관리", "🤖 에이전트 관리", "📈 모니터링"])
